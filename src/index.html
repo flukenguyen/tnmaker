@@ -175,7 +175,7 @@
                             <span class="font-bold text-lg tracking-tight">HCTMaker <span class="text-emerald-400">Pro</span></span>
                             <span class="hidden sm:inline-block text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">Mẫu Đen Trắng BGD 2025</span>
                         </div>
-                        <p class="text-xs text-slate-400 hidden sm:block">Chuẩn Phiếu TLTN 2025 Mã đề 4 số đen trắng (GDPT 2018)</p>
+                        <p class="text-xs text-slate-400 hidden sm:block">Chuẩn Phiếu TLTN 2025 Mã đề 4 số đen trắng (GDPT 2018) - Copyright © Trần Tài Lộc</p>
                     </div>
                 </div>
 
@@ -594,6 +594,12 @@
                     <div class="flex items-center gap-2 flex-wrap">
                         <button onclick="randomizeCurrentKey()" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition flex items-center gap-1.5">
                             <i class="fa-solid fa-wand-magic-sparkles text-indigo-600"></i> Sinh nhanh đáp án mẫu
+                        </button>
+                        <button onclick="openQrShare()" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-qrcode text-indigo-600"></i> Chia sẻ mã QR
+                        </button>
+                        <button onclick="openQrImport()" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-camera"></i> Nhập bằng mã QR
                         </button>
                         <button onclick="exportKeyJSON()" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition flex items-center gap-1.5">
                             <i class="fa-solid fa-file-export text-emerald-600"></i> Xuất JSON
@@ -1022,6 +1028,505 @@
     <!-- JAVASCRIPT ENGINE: STATE, BGD 2025 BLACK-WHITE SHEET GEOMETRY & OMR       -->
     <!-- ========================================================================= -->
     <script>
+// ===== TNQR: tạo và đọc mã QR, không cần thư viện ngoài (phiên bản 1-10, chế độ byte, mức sửa lỗi L/M) =====
+const TNQR = (function () {
+    // ---------- Trường Galois GF(256) ----------
+    const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+    (function () { let x = 1; for (let i = 0; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 256) x ^= 0x11d; } for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255]; })();
+    const gmul = (a, b) => (a && b) ? EXP[LOG[a] + LOG[b]] : 0;
+    const gpow = (a, e) => e === 0 ? 1 : (a === 0 ? 0 : EXP[(LOG[a] * e) % 255]);
+    const gdiv = (a, b) => a === 0 ? 0 : EXP[(LOG[a] + 255 - LOG[b]) % 255];
+
+    function rsGenerator(n) {
+        let g = [1];
+        for (let i = 0; i < n; i++) {
+            const ng = new Array(g.length + 1).fill(0);
+            for (let j = 0; j < g.length; j++) { ng[j] ^= g[j]; ng[j + 1] ^= gmul(g[j], EXP[i]); }
+            g = ng;
+        }
+        return g;                                    // hệ số cao -> thấp, g[0] = 1
+    }
+    function rsEncode(data, n) {
+        const g = rsGenerator(n), res = new Array(n).fill(0);
+        for (const d of data) {
+            const f = d ^ res[0];
+            res.shift(); res.push(0);
+            if (f) for (let i = 0; i < n; i++) res[i] ^= gmul(g[i + 1], f);
+        }
+        return res;
+    }
+    // Giải mã Reed-Solomon (Berlekamp-Massey), trả về mảng đã sửa hoặc null
+    function rsCorrect(msg, nsym) {
+        const r = msg.slice();
+        const synd = new Array(nsym).fill(0);
+        let bad = false;
+        for (let i = 0; i < nsym; i++) {
+            let s = 0;
+            for (let j = 0; j < r.length; j++) s = gmul(s, EXP[i]) ^ r[j];
+            synd[i] = s; if (s) bad = true;
+        }
+        if (!bad) return r;
+        let C = [1], B = [1], L = 0, m = 1, b = 1;
+        for (let n = 0; n < nsym; n++) {
+            let d = synd[n];
+            for (let i = 1; i <= L; i++) d ^= gmul(C[i] || 0, synd[n - i]);
+            if (d === 0) { m++; continue; }
+            const T = C.slice(), coef = gdiv(d, b);
+            while (C.length < B.length + m) C.push(0);
+            for (let i = 0; i < B.length; i++) C[i + m] ^= gmul(coef, B[i]);
+            if (2 * L <= n) { L = n + 1 - L; B = T; b = d; m = 1; } else m++;
+        }
+        if (L * 2 > nsym) return null;
+        const N = r.length, errPos = [];
+        for (let i = 0; i < N; i++) {                // vị trí lỗi: C(alpha^-(N-1-i)) = 0
+            const xinv = EXP[(255 - ((N - 1 - i) % 255)) % 255];
+            let v = 0, xp = 1;
+            for (let k = 0; k < C.length; k++) { v ^= gmul(C[k], xp); xp = gmul(xp, xinv); }
+            if (v === 0) errPos.push(i);
+        }
+        if (errPos.length !== L) return null;
+        // Omega = S(x) * C(x) mod x^nsym
+        const omega = new Array(nsym).fill(0);
+        for (let i = 0; i < nsym; i++) for (let j = 0; j < C.length && i + j < nsym; j++) omega[i + j] ^= gmul(synd[i], C[j]);
+        for (const pos of errPos) {
+            const xi = EXP[(N - 1 - pos) % 255], xinv = EXP[(255 - ((N - 1 - pos) % 255)) % 255];
+            let num = 0, xp = 1;
+            for (let k = 0; k < omega.length; k++) { num ^= gmul(omega[k], xp); xp = gmul(xp, xinv); }
+            let den = 0;
+            for (let k = 1; k < C.length; k += 2) den ^= gmul(C[k], gpow(xinv, k - 1));
+            if (den === 0) return null;
+            r[pos] ^= gmul(xi, gdiv(num, den));
+        }
+        // kiểm tra lại
+        for (let i = 0; i < nsym; i++) { let s = 0; for (let j = 0; j < r.length; j++) s = gmul(s, EXP[i]) ^ r[j]; if (s) return null; }
+        return r;
+    }
+
+    // ---------- Bảng phiên bản: [ecPerBlock, blocksG1, dataG1, blocksG2, dataG2] ----------
+    const EC = {
+        L: [null, [7, 1, 19, 0, 0], [10, 1, 34, 0, 0], [15, 1, 55, 0, 0], [20, 1, 80, 0, 0], [26, 1, 108, 0, 0], [18, 2, 68, 0, 0], [20, 2, 78, 0, 0], [24, 2, 97, 0, 0], [30, 2, 116, 0, 0], [18, 2, 68, 2, 69]],
+        M: [null, [10, 1, 16, 0, 0], [16, 1, 28, 0, 0], [26, 1, 44, 0, 0], [18, 2, 32, 0, 0], [24, 2, 43, 0, 0], [16, 4, 27, 0, 0], [18, 4, 31, 0, 0], [22, 2, 38, 2, 39], [22, 3, 36, 2, 37], [26, 4, 43, 1, 44]]
+    };
+    const ALIGN = [null, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+    const FMT_BITS = { L: 1, M: 0 };
+    const dataCap = (v, lv) => { const e = EC[lv][v]; return e[1] * e[2] + e[3] * e[4]; };
+
+    function bchFormat(data) { let d = data << 10; for (let i = 14; i >= 10; i--) if (d & (1 << i)) d ^= 0x537 << (i - 10); return ((data << 10) | d) ^ 0x5412; }
+    function bchVersion(v) { let d = v << 12; for (let i = 17; i >= 12; i--) if (d & (1 << i)) d ^= 0x1f25 << (i - 12); return (v << 12) | d; }
+
+    function utf8(str) { return Array.from(new TextEncoder().encode(str)); }
+
+    // ---------- Ma trận hàm (vị trí các ô dành riêng) ----------
+    function buildBase(v) {
+        const n = 17 + 4 * v;
+        const m = Array.from({ length: n }, () => new Int8Array(n).fill(-1));   // -1 = ô dữ liệu
+        const fn = Array.from({ length: n }, () => new Uint8Array(n));
+        const set = (r, c, val) => { if (r < 0 || c < 0 || r >= n || c >= n) return; m[r][c] = val; fn[r][c] = 1; };
+        const finder = (r0, c0) => {
+            for (let dr = -1; dr <= 7; dr++) for (let dc = -1; dc <= 7; dc++) {
+                const r = r0 + dr, c = c0 + dc;
+                const inside = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6;
+                const dark = inside && (dr === 0 || dr === 6 || dc === 0 || dc === 6 || (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4));
+                set(r, c, dark ? 1 : 0);
+            }
+        };
+        finder(0, 0); finder(0, n - 7); finder(n - 7, 0);
+        for (let i = 8; i < n - 8; i++) { set(6, i, i % 2 === 0 ? 1 : 0); set(i, 6, i % 2 === 0 ? 1 : 0); }
+        const ap = ALIGN[v];
+        for (const r of ap) for (const c of ap) {
+            if ((r === 6 && c === 6) || (r === 6 && c === ap[ap.length - 1]) || (r === ap[ap.length - 1] && c === 6)) continue;
+            for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) set(r + dr, c + dc, Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 0 : 1);
+        }
+        for (let i = 0; i < 9; i++) { if (!fn[8][i]) { m[8][i] = 0; fn[8][i] = 1; } if (!fn[i][8]) { m[i][8] = 0; fn[i][8] = 1; } }
+        for (let i = 0; i < 8; i++) { m[8][n - 1 - i] = 0; fn[8][n - 1 - i] = 1; m[n - 1 - i][8] = 0; fn[n - 1 - i][8] = 1; }
+        set(n - 8, 8, 1);                                                          // ô tối cố định
+        if (v >= 7) {
+            const bits = bchVersion(v);
+            for (let i = 0; i < 18; i++) {
+                const bit = (bits >> i) & 1, a = Math.floor(i / 3), b = i % 3 + n - 11;
+                set(a, b, bit); set(b, a, bit);
+            }
+        }
+        return { n, m, fn };
+    }
+
+    const MASKS = [
+        (r, c) => (r + c) % 2 === 0, (r, c) => r % 2 === 0, (r, c) => c % 3 === 0, (r, c) => (r + c) % 3 === 0,
+        (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0, (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+        (r, c) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0, (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0
+    ];
+
+    function dataCoords(n, fn) {                       // thứ tự đi của các ô dữ liệu (zigzag)
+        const out = []; let up = true;
+        for (let col = n - 1; col > 0; col -= 2) {
+            if (col === 6) col--;
+            for (let i = 0; i < n; i++) {
+                const r = up ? n - 1 - i : i;
+                for (let k = 0; k < 2; k++) { const c = col - k; if (!fn[r][c]) out.push([r, c]); }
+            }
+            up = !up;
+        }
+        return out;
+    }
+
+    function penalty(m, n) {
+        let p = 0;
+        for (let pass = 0; pass < 2; pass++) {
+            for (let a = 0; a < n; a++) {
+                let run = 1, prev = pass ? m[0][a] : m[a][0];
+                for (let b = 1; b < n; b++) {
+                    const cur = pass ? m[b][a] : m[a][b];
+                    if (cur === prev) { run++; if (run === 5) p += 3; else if (run > 5) p++; } else { run = 1; prev = cur; }
+                }
+                for (let b = 0; b + 10 < n; b++) {          // mẫu 1:1:3:1:1
+                    const g = i => pass ? m[b + i][a] : m[a][b + i];
+                    const pat1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0], pat2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
+                    let ok1 = true, ok2 = true;
+                    for (let i = 0; i < 11; i++) { const x = g(i); if (x !== pat1[i]) ok1 = false; if (x !== pat2[i]) ok2 = false; }
+                    if (ok1) p += 40; if (ok2) p += 40;
+                }
+            }
+        }
+        for (let r = 0; r < n - 1; r++) for (let c = 0; c < n - 1; c++) { const x = m[r][c]; if (x === m[r][c + 1] && x === m[r + 1][c] && x === m[r + 1][c + 1]) p += 3; }
+        let dark = 0; for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (m[r][c]) dark++;
+        p += Math.floor(Math.abs(dark * 100 / (n * n) - 50) / 5) * 10;
+        return p;
+    }
+
+    function encode(text) {
+        const bytes = utf8(text);
+        let lv = 'M', ver = 0;
+        for (const level of ['M', 'L']) {
+            for (let v = 1; v <= 10; v++) {
+                const cc = v < 10 ? 8 : 16;
+                if (4 + cc + bytes.length * 8 + 8 <= dataCap(v, level) * 8) { lv = level; ver = v; break; }
+            }
+            if (ver) break;
+        }
+        if (!ver) throw new Error('Nội dung quá dài để tạo mã QR');
+        const cap = dataCap(ver, lv), cc = ver < 10 ? 8 : 16;
+        const bits = [];
+        const push = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >> i) & 1); };
+        push(4, 4); push(bytes.length, cc); bytes.forEach(b => push(b, 8));
+        push(0, Math.min(4, cap * 8 - bits.length));
+        while (bits.length % 8) bits.push(0);
+        const cw = []; for (let i = 0; i < bits.length; i += 8) { let b = 0; for (let k = 0; k < 8; k++) b = (b << 1) | bits[i + k]; cw.push(b); }
+        for (let pad = 0; cw.length < cap; pad++) cw.push(pad % 2 ? 0x11 : 0xec);
+        // chia khối + mã sửa lỗi
+        const e = EC[lv][ver], blocks = [];
+        let pos = 0;
+        for (let i = 0; i < e[1] + e[3]; i++) { const len = i < e[1] ? e[2] : e[4]; blocks.push(cw.slice(pos, pos + len)); pos += len; }
+        const ecs = blocks.map(b => rsEncode(b, e[0]));
+        const final = [], maxLen = Math.max(...blocks.map(b => b.length));
+        for (let i = 0; i < maxLen; i++) blocks.forEach(b => { if (i < b.length) final.push(b[i]); });
+        for (let i = 0; i < e[0]; i++) ecs.forEach(b => final.push(b[i]));
+        const fbits = []; final.forEach(b => { for (let i = 7; i >= 0; i--) fbits.push((b >> i) & 1); });
+
+        const { n, m, fn } = buildBase(ver);
+        const coords = dataCoords(n, fn);
+        let best = null, bestP = Infinity, bestMask = 0;
+        for (let mk = 0; mk < 8; mk++) {
+            const t = m.map(r => Array.from(r));
+            coords.forEach(([r, c], i) => { const bit = i < fbits.length ? fbits[i] : 0; t[r][c] = bit ^ (MASKS[mk](r, c) ? 1 : 0); });
+            const f = bchFormat((FMT_BITS[lv] << 3) | mk);
+            for (let i = 0; i < 15; i++) {
+                const bit = (f >> i) & 1;
+                if (i < 6) t[i][8] = bit; else if (i < 8) t[i + 1][8] = bit; else t[n - 15 + i][8] = bit;
+                if (i < 8) t[8][n - 1 - i] = bit; else if (i < 9) t[8][15 - i] = bit; else t[8][15 - i - 1] = bit;
+            }
+            t[n - 8][8] = 1;
+            const pn = penalty(t, n);
+            if (pn < bestP) { bestP = pn; best = t; bestMask = mk; }
+        }
+        return { size: n, version: ver, level: lv, modules: best };
+    }
+
+    // Vẽ mã QR ra canvas (có viền trắng 4 ô)
+    function drawToCanvas(canvas, text, px) {
+        const q = encode(text), quiet = 4, total = q.size + quiet * 2;
+        const scale = Math.max(2, Math.floor((px || 320) / total));
+        canvas.width = canvas.height = total * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000';
+        for (let r = 0; r < q.size; r++) for (let c = 0; c < q.size; c++) if (q.modules[r][c]) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+        return q;
+    }
+
+    // ======================= ĐỌC MÃ QR TỪ ẢNH XÁM =======================
+    // gray: Uint8Array w*h. Trả về chuỗi hoặc null.
+    function decode(gray, w, h, noUpscale) {
+        let sawFinders = false;
+        for (const inv of [false, true]) {
+            const bin = binarize(gray, w, h, inv);
+            const cands = findFinders(bin, w, h);
+            if (cands.filter(c => c.n >= 2).length >= 3) sawFinders = true; else continue;
+            const res = tryDecodeFromFinders(bin, w, h, cands);
+            if (res !== null) return res;
+        }
+        // Thấy dấu 3 góc nhưng chưa đọc được (ô quá nhỏ): phóng to gấp đôi rồi thử lại một lần
+        if (sawFinders && !noUpscale && w * h <= 800000) {
+            const W = w * 2, Hh = h * 2, up = new Uint8Array(W * Hh);
+            for (let y = 0; y < Hh; y++) {
+                const fy = Math.min(h - 1, y / 2), y0 = Math.floor(fy), y1 = Math.min(h - 1, y0 + 1), ty = fy - y0;
+                for (let x = 0; x < W; x++) {
+                    const fx = Math.min(w - 1, x / 2), x0 = Math.floor(fx), x1 = Math.min(w - 1, x0 + 1), tx = fx - x0;
+                    up[y * W + x] = (gray[y0 * w + x0] * (1 - tx) + gray[y0 * w + x1] * tx) * (1 - ty) + (gray[y1 * w + x0] * (1 - tx) + gray[y1 * w + x1] * tx) * ty;
+                }
+            }
+            return decode(up, W, Hh, true);
+        }
+        return null;
+    }
+
+    function binarize(gray, w, h, invert) {
+        // ngưỡng thích nghi theo ảnh tích phân
+        const W1 = w + 1, I = new Float64Array(W1 * (h + 1));
+        for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += gray[y * w + x]; I[(y + 1) * W1 + x + 1] = I[y * W1 + x + 1] + row; } }
+        const R = Math.max(8, Math.round(Math.min(w, h) / 14));
+        const out = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) {
+            const y0 = Math.max(0, y - R), y1 = Math.min(h, y + R + 1);
+            for (let x = 0; x < w; x++) {
+                const x0 = Math.max(0, x - R), x1 = Math.min(w, x + R + 1);
+                const s = I[y1 * W1 + x1] - I[y0 * W1 + x1] - I[y1 * W1 + x0] + I[y0 * W1 + x0];
+                const mean = s / ((x1 - x0) * (y1 - y0));
+                let dark = gray[y * w + x] < mean * 0.92 - 2;
+                out[y * w + x] = (invert ? !dark : dark) ? 1 : 0;
+            }
+        }
+        return out;
+    }
+
+    function findFinders(bin, w, h) {
+        const found = [];
+        for (let y = 0; y < h; y++) {
+            const runs = []; let x = 0;                       // [màu, bắt đầu, độ dài]
+            while (x < w) { const v = bin[y * w + x]; let e = x + 1; while (e < w && bin[y * w + e] === v) e++; runs.push([v, x, e - x]); x = e; }
+            for (let i = 0; i + 4 < runs.length; i++) {
+                if (runs[i][0] !== 1) continue;
+                const L = [0, 1, 2, 3, 4].map(k => runs[i + k][2]);
+                const total = L[0] + L[1] + L[2] + L[3] + L[4];
+                if (total < 7) continue;
+                const u = total / 7, tol = u * 0.65;
+                if (Math.abs(L[0] - u) < tol && Math.abs(L[1] - u) < tol && Math.abs(L[2] - 3 * u) < 3 * tol && Math.abs(L[3] - u) < tol && Math.abs(L[4] - u) < tol) {
+                    const cx = runs[i + 2][1] + runs[i + 2][2] / 2;
+                    addCandidate(found, cx, y, u, bin, w, h);
+                }
+            }
+        }
+        return found;
+    }
+
+    // Lấy theo cách chuẩn hơn: quét ngang rồi xác nhận lại dọc để lấy tâm chính xác
+    function addCandidate(list, cx, cy, mod, bin, w, h) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        if (cx < 0 || cx >= w) return;
+        // xác nhận dọc tại cột cx
+        const vc = vertical(bin, w, h, cx, cy);
+        if (!vc) return;
+        const hc = horizontal(bin, w, h, cx, Math.round(vc.c));
+        if (!hc) return;
+        const X = hc.c, Y = vc.c, M = (hc.m + vc.m) / 2;
+        for (const f of list) if (Math.abs(f.x - X) < M * 2 && Math.abs(f.y - Y) < M * 2) { f.n++; f.x = (f.x * (f.n - 1) + X) / f.n; f.y = (f.y * (f.n - 1) + Y) / f.n; f.m = (f.m * (f.n - 1) + M) / f.n; return; }
+        list.push({ x: X, y: Y, m: M, n: 1 });
+    }
+    function lineRatio(get, len, pos) {
+        // đi 2 phía từ pos (đang ở ô đen tâm), trả về tâm và cỡ ô nếu khớp 1:1:3:1:1
+        const cnt = [0, 0, 0, 0, 0];
+        let i = pos;
+        while (i >= 0 && get(i)) { cnt[2]++; i--; }
+        if (i < 0) return null;
+        while (i >= 0 && !get(i)) { cnt[1]++; i--; }
+        if (i < 0) return null;
+        while (i >= 0 && get(i)) { cnt[0]++; i--; }
+        let j = pos + 1;
+        while (j < len && get(j)) { cnt[2]++; j++; }
+        while (j < len && !get(j)) { cnt[3]++; j++; }
+        if (j >= len) return null;
+        while (j < len && get(j)) { cnt[4]++; j++; }
+        const total = cnt.reduce((a, b) => a + b, 0), u = total / 7, tol = u * 0.65;
+        if (!(Math.abs(cnt[0] - u) < tol && Math.abs(cnt[1] - u) < tol && Math.abs(cnt[2] - 3 * u) < 3 * tol && Math.abs(cnt[3] - u) < tol && Math.abs(cnt[4] - u) < tol)) return null;
+        const start = pos - cnt[2] + (j - pos - 1 - cnt[4] - cnt[3] > 0 ? 0 : 0);
+        // tâm = giữa dải đen trung tâm
+        let a = pos; while (a - 1 >= 0 && get(a - 1)) a--;
+        let b = pos; while (b + 1 < len && get(b + 1)) b++;
+        return { c: (a + b) / 2 + 0.5, m: u };
+    }
+    function vertical(bin, w, h, x, y) { return lineRatio(i => bin[i * w + x] === 1, h, y); }
+    function horizontal(bin, w, h, x, y) { return lineRatio(i => bin[y * w + i] === 1, w, x); }
+
+    function tryDecodeFromFinders(bin, w, h, cands) {
+        const good = cands.filter(c => c.n >= 2).sort((a, b) => b.n - a.n).slice(0, 7);
+        if (good.length < 3) return null;
+        for (let a = 0; a < good.length; a++) for (let b = a + 1; b < good.length; b++) for (let c = b + 1; c < good.length; c++) {
+            const trip = [good[a], good[b], good[c]];
+            const ms = trip.map(t => t.m);
+            if (Math.max(...ms) / Math.min(...ms) > 1.6) continue;
+            const res = decodeTriple(bin, w, h, trip);
+            if (res !== null) return res;
+        }
+        return null;
+    }
+
+    function decodeTriple(bin, w, h, trip) {
+        // xác định góc trên-trái: đỉnh vuông góc
+        const d = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+        let tl, tr, bl;
+        const d01 = d(trip[0], trip[1]), d02 = d(trip[0], trip[2]), d12 = d(trip[1], trip[2]);
+        const mx = Math.max(d01, d02, d12);
+        if (mx === d12) { tl = trip[0]; tr = trip[1]; bl = trip[2]; }
+        else if (mx === d02) { tl = trip[1]; tr = trip[0]; bl = trip[2]; }
+        else { tl = trip[2]; tr = trip[0]; bl = trip[1]; }
+        // đảm bảo thứ tự: tr nằm "bên phải" tl theo chiều kim đồng hồ
+        const cross = (tr.x - tl.x) * (bl.y - tl.y) - (tr.y - tl.y) * (bl.x - tl.x);
+        if (cross < 0) { const t = tr; tr = bl; bl = t; }
+        const mod = (tl.m + tr.m + bl.m) / 3;
+        const dist = (d(tl, tr) + d(tl, bl)) / 2;
+        const verEst = Math.round(((dist / mod) - 10) / 4);
+        for (const ver of [verEst, verEst - 1, verEst + 1]) {
+            if (ver < 1 || ver > 10) continue;
+            const r = decodeWithVersion(bin, w, h, tl, tr, bl, ver);
+            if (r !== null) return r;
+        }
+        return null;
+    }
+
+    function decodeWithVersion(bin, w, h, tl, tr, bl, ver) {
+        const n = 17 + 4 * ver;
+        const span = n - 7;                                     // khoảng cách tâm finder theo đơn vị ô
+        // ánh xạ affine: toạ độ ô (col,row) tính từ tâm finder TL (3.5,3.5)
+        const ux = (tr.x - tl.x) / span, uy = (tr.y - tl.y) / span;
+        const vx = (bl.x - tl.x) / span, vy = (bl.y - tl.y) / span;
+        let br = { x: tr.x + bl.x - tl.x, y: tr.y + bl.y - tl.y };
+        // tinh chỉnh bằng mẫu căn chỉnh (nếu có) -> phép chiếu phối cảnh
+        let map = (c, r) => ({ x: tl.x + ux * (c - 3.5) + vx * (r - 3.5), y: tl.y + uy * (c - 3.5) + vy * (r - 3.5) });
+        if (ver >= 2) {
+            const ac = n - 6.5, est = map(ac, ac);
+            const found = locateAlignment(bin, w, h, est, Math.hypot(ux, uy));
+            if (found) {
+                const H = homography([[3.5, 3.5, tl.x, tl.y], [n - 3.5, 3.5, tr.x, tr.y], [3.5, n - 3.5, bl.x, bl.y], [ac, ac, found.x, found.y]]);
+                if (H) map = (c, r) => applyH(H, c, r);
+            }
+        }
+        const sample = (c, r) => { const p = map(c + 0.5, r + 0.5); const x = Math.round(p.x - 0.5), y = Math.round(p.y - 0.5); if (x < 0 || y < 0 || x >= w || y >= h) return 0; return bin[y * w + x]; };
+        const m = Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) => sample(c, r)));
+        return readMatrix(m, n, ver) ?? readMatrix(transpose(m, n), n, ver);
+    }
+    function transpose(m, n) { return m.map((row, r) => row.map((_, c) => m[c][r])); }
+
+    function locateAlignment(bin, w, h, est, u) {
+        // tìm khối đen 3x3 ô nhỏ quanh vị trí dự đoán
+        const R = Math.round(u * 4);
+        let best = null, bestScore = -1e9;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+            const x = Math.round(est.x + dx), y = Math.round(est.y + dy);
+            if (x < 0 || y < 0 || x >= w || y >= h || !bin[y * w + x]) continue;
+            // mẫu căn chỉnh: tâm đen, vòng trắng bán kính ~u, vòng đen bán kính ~2u
+            const ring = (rad) => { let s = 0, k = 0; for (let a = 0; a < 8; a++) { const px = Math.round(x + Math.cos(a * Math.PI / 4) * rad), py = Math.round(y + Math.sin(a * Math.PI / 4) * rad); if (px < 0 || py < 0 || px >= w || py >= h) continue; s += bin[py * w + px]; k++; } return k ? s / k : 0.5; };
+            const score = (1 - ring(u)) + ring(2 * u) - Math.hypot(dx, dy) / (R * 4);
+            if (score > bestScore) { bestScore = score; best = { x, y }; }
+        }
+        if (!best || bestScore < 1.2) return null;
+        // làm mịn theo tâm khối đen trung tâm
+        let sx = 0, sy = 0, k = 0;
+        const rr = Math.max(1, Math.round(u * 0.9));
+        for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) { const x = best.x + dx, y = best.y + dy; if (x >= 0 && y >= 0 && x < w && y < h && bin[y * w + x]) { sx += x; sy += y; k++; } }
+        return k ? { x: sx / k, y: sy / k } : best;
+    }
+
+    function homography(pts) {                          // 4 điểm (u,v) -> (x,y): giải hệ 8x8
+        const A = [], B = [];
+        pts.forEach(([u, v, x, y]) => { A.push([u, v, 1, 0, 0, 0, -u * x, -v * x]); B.push(x); A.push([0, 0, 0, u, v, 1, -u * y, -v * y]); B.push(y); });
+        const n = 8;
+        for (let i = 0; i < n; i++) {
+            let p = i; for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+            if (Math.abs(A[p][i]) < 1e-12) return null;
+            [A[i], A[p]] = [A[p], A[i]]; [B[i], B[p]] = [B[p], B[i]];
+            for (let r = i + 1; r < n; r++) { const f = A[r][i] / A[i][i]; for (let c = i; c < n; c++) A[r][c] -= f * A[i][c]; B[r] -= f * B[i]; }
+        }
+        const X = new Array(n);
+        for (let i = n - 1; i >= 0; i--) { let s = B[i]; for (let c = i + 1; c < n; c++) s -= A[i][c] * X[c]; X[i] = s / A[i][i]; }
+        return X;
+    }
+    function applyH(H, u, v) { const d = H[6] * u + H[7] * v + 1; return { x: (H[0] * u + H[1] * v + H[2]) / d, y: (H[3] * u + H[4] * v + H[5]) / d }; }
+
+    function readMatrix(m, n, ver) {
+        // thông tin định dạng
+        const fa = [], fb = [];
+        for (let i = 0; i <= 5; i++) fa.push(m[i][8]); fa.push(m[7][8]); fa.push(m[8][8]); fa.push(m[8][7]);
+        for (let i = 5; i >= 0; i--) fa.push(m[8][i]);
+        for (let i = 0; i < 8; i++) fb.push(m[8][n - 1 - i]);
+        for (let i = 0; i < 7; i++) fb.push(m[n - 7 + i][8]);
+        const toNum = bits => bits.reduce((a, b) => (a << 1) | b, 0);
+        // bits theo thứ tự từ bit14 -> bit0 là fa[0..14]? Đối chiếu với encoder: bit i -> vị trí như trong encode()
+        const readFmt = () => {
+            const bitsAt = [];
+            for (let i = 0; i < 15; i++) {
+                let a; if (i < 6) a = m[i][8]; else if (i < 8) a = m[i + 1][8]; else a = m[n - 15 + i][8];
+                let b; if (i < 8) b = m[8][n - 1 - i]; else if (i < 9) b = m[8][15 - i]; else b = m[8][15 - i - 1];
+                bitsAt.push([a, b]);
+            }
+            const val = k => { let v = 0; for (let i = 0; i < 15; i++) v |= bitsAt[i][k] << i; return v; };
+            let best = null, bd = 99;
+            for (const raw of [val(0), val(1)]) for (let d = 0; d < 32; d++) {
+                const cand = bchFormat(d), diff = popcount(cand ^ raw);
+                if (diff < bd) { bd = diff; best = d; }
+            }
+            return bd <= 3 ? best : null;
+        };
+        const fmt = readFmt();
+        if (fmt === null) return null;
+        const lvBits = fmt >> 3, mask = fmt & 7;
+        const lv = lvBits === 1 ? 'L' : lvBits === 0 ? 'M' : null;
+        if (!lv) return null;
+        const { fn } = buildBase(ver);
+        const coords = dataCoords(n, fn);
+        const bits = coords.map(([r, c]) => m[r][c] ^ (MASKS[mask](r, c) ? 1 : 0));
+        const cws = []; for (let i = 0; i + 8 <= bits.length; i += 8) { let b = 0; for (let k = 0; k < 8; k++) b = (b << 1) | bits[i + k]; cws.push(b); }
+        const e = EC[lv][ver], nb = e[1] + e[3];
+        const blockLens = []; for (let i = 0; i < nb; i++) blockLens.push(i < e[1] ? e[2] : e[4]);
+        const maxLen = Math.max(...blockLens);
+        const blocks = blockLens.map(() => []);
+        let p = 0;
+        for (let i = 0; i < maxLen; i++) for (let b = 0; b < nb; b++) if (i < blockLens[b]) blocks[b].push(cws[p++]);
+        const ecs = blockLens.map(() => []);
+        for (let i = 0; i < e[0]; i++) for (let b = 0; b < nb; b++) ecs[b].push(cws[p++]);
+        const data = [];
+        for (let b = 0; b < nb; b++) {
+            const fixed = rsCorrect(blocks[b].concat(ecs[b]), e[0]);
+            if (!fixed) return null;
+            for (let i = 0; i < blockLens[b]; i++) data.push(fixed[i]);
+        }
+        // giải mã luồng bit (chế độ byte)
+        const sb = []; data.forEach(b => { for (let i = 7; i >= 0; i--) sb.push((b >> i) & 1); });
+        let q = 0;
+        const take = len => { let v = 0; for (let i = 0; i < len; i++) v = (v << 1) | (sb[q++] || 0); return v; };
+        const out = [];
+        while (q + 4 <= sb.length) {
+            const mode = take(4);
+            if (mode === 0) break;
+            if (mode !== 4) return null;
+            const len = take(ver < 10 ? 8 : 16);
+            for (let i = 0; i < len; i++) out.push(take(8));
+        }
+        try { return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(out)); } catch (e) { return null; }
+    }
+    function popcount(x) { let c = 0; while (x) { c += x & 1; x >>>= 1; } return c; }
+
+    function decodeImageData(img) {
+        const { data, width: w, height: h } = img;
+        const g = new Uint8Array(w * h);
+        for (let i = 0; i < w * h; i++) g[i] = (data[i * 4] * 77 + data[i * 4 + 1] * 150 + data[i * 4 + 2] * 29) >> 8;
+        return decode(g, w, h);
+    }
+
+    return { encode, drawToCanvas, decode, decodeImageData, _rsCorrect: rsCorrect, _rsEncode: rsEncode };
+})();
+if (typeof module !== 'undefined') module.exports = TNQR;
+
+    </script>
+    <script>
         const STORAGE_KEY = 'TNMAKER_PRO_BGD2025_BW_V3_PDF8';
         let appState = null;
         let activeExamId = null;
@@ -1391,6 +1896,7 @@
                 activeBtn.className = 'nav-tab-btn flex-1 md:flex-none flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-2 px-1 md:px-4 py-1.5 md:py-2 rounded-xl text-[10px] md:text-sm font-bold transition whitespace-nowrap bg-indigo-600 text-white shadow-sm';
             }
 
+            if (typeof closeQrImport === 'function') closeQrImport();
             if (tabId !== 'tab-scanner') {
                 stopLiveCamera();
                 hideScanResultOverlay();
@@ -1637,6 +2143,187 @@
             document.getElementById('bannerKeyCount').textContent = Object.keys(exam.keys).length + ' mã';
             document.getElementById('bannerScannedCount').textContent = exam.results.length + ' bài';
             document.getElementById('badge-graded-count').textContent = exam.results.length;
+        }
+
+
+        // =========================================================================
+        // CHIA SẺ / NHẬP MÃ ĐỀ + ĐÁP ÁN BẰNG MÃ QR  (định dạng: TNM1|mã|p1|p2|p3|đáp án I|đáp án II (D/S)|đáp án III (;))
+        // =========================================================================
+        let qrMode = 'one', qrList = [], qrIdx = 0;
+
+        function buildKeyPayload(code) {
+            const exam = getCurrentExam(), cfg = exam.config, k = exam.keys[code];
+            const p1 = k.p1.slice(0, cfg.p1Count).map(x => ['A', 'B', 'C', 'D'].includes(x) ? x : 'A').join('');
+            const p2 = k.p2.slice(0, cfg.p2Count).map(q => q.map(v => v === 'Đ' ? 'D' : 'S').join('')).join('');
+            const p3 = k.p3.slice(0, cfg.p3Count).map(v => String(v || '').replace(/[^0-9\-,]/g, '')).join(';');
+            return ['TNM1', code, cfg.p1Count, cfg.p2Count, cfg.p3Count, p1, p2, p3].join('|');
+        }
+
+        function openQrShare() {
+            const exam = getCurrentExam();
+            qrMode = 'one';
+            document.getElementById('qrShareModal').classList.remove('hidden');
+            refreshQrShare();
+        }
+        function closeQrShare() { document.getElementById('qrShareModal').classList.add('hidden'); }
+        function setQrMode(m) { qrMode = m; qrIdx = 0; refreshQrShare(); }
+        function qrNav(d) { if (qrList.length < 2) return; qrIdx = (qrIdx + d + qrList.length) % qrList.length; renderQr(); }
+
+        function refreshQrShare() {
+            const exam = getCurrentExam(), codes = Object.keys(exam.keys);
+            qrList = qrMode === 'all' ? codes : [exam.keys[activeKeyCode] ? activeKeyCode : codes[0]];
+            if (qrMode === 'all') qrIdx = Math.max(0, Math.min(qrIdx, qrList.length - 1)); else qrIdx = 0;
+            document.getElementById('qrModeOne').className = 'py-2 rounded-lg ' + (qrMode === 'one' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700');
+            document.getElementById('qrModeAll').className = 'py-2 rounded-lg ' + (qrMode === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700');
+            renderQr();
+        }
+
+        function renderQr() {
+            const code = qrList[qrIdx];
+            const payload = buildKeyPayload(code);
+            let info = '';
+            try {
+                const q = TNQR.drawToCanvas(document.getElementById('qrCanvas'), payload, 420);
+                info = `${payload.length} ký tự`;
+            } catch (e) { info = 'Không tạo được mã QR: ' + e.message; }
+            document.getElementById('qrShareTitle').textContent = 'Mã đề ' + code;
+            document.getElementById('qrShareInfo').textContent = (qrList.length > 1 ? `Mã ${qrIdx + 1}/${qrList.length} · ` : '') + info;
+            const multi = qrList.length > 1;
+            document.getElementById('qrPrev').style.visibility = multi ? 'visible' : 'hidden';
+            document.getElementById('qrNext').style.visibility = multi ? 'visible' : 'hidden';
+        }
+
+        function downloadQr() {
+            const code = qrList[qrIdx];
+            document.getElementById('qrCanvas').toBlob(blob => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'QR-ma-de-' + code + '.png';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+            }, 'image/png');
+            showToast('Đã lưu ảnh QR mã đề ' + code);
+        }
+
+        function copyQrText() {
+            const text = buildKeyPayload(qrList[qrIdx]);
+            const done = () => showToast('Đã sao chép nội dung mã đề');
+            if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, () => { prompt('Sao chép nội dung:', text); });
+            else prompt('Sao chép nội dung:', text);
+        }
+
+        // ---------- Nhập ----------
+        function parseKeyPayload(text) {
+            const parts = String(text || '').trim().split('|');
+            if (parts[0] !== 'TNM1' || parts.length < 8) return null;
+            const code = parts[1].replace(/\D/g, '').padStart(4, '0').slice(0, 4);
+            const p1c = parseInt(parts[2]), p2c = parseInt(parts[3]), p3c = parseInt(parts[4]);
+            if (![p1c, p2c, p3c].every(Number.isFinite) || p1c < 0 || p1c > 40 || p2c < 0 || p2c > 8 || p3c < 0 || p3c > 6) return null;
+            const p1s = parts[5], p2s = parts[6], p3s = parts.slice(7).join('|');
+            if (!/^[ABCD]*$/.test(p1s) || p1s.length !== p1c) return null;
+            if (!/^[DS]*$/.test(p2s) || p2s.length !== p2c * 4) return null;
+            const key = createBlankKey();
+            for (let i = 0; i < p1c; i++) key.p1[i] = p1s[i];
+            for (let q = 0; q < p2c; q++) for (let s = 0; s < 4; s++) key.p2[q][s] = p2s[q * 4 + s] === 'D' ? 'Đ' : 'S';
+            const p3 = p3s.split(';');
+            for (let q = 0; q < p3c; q++) key.p3[q] = (p3[q] || '').replace(/[^0-9\-,]/g, '').slice(0, 4);
+            return { code, p1c, p2c, p3c, key };
+        }
+
+        function importKeyPayload(text) {
+            const r = parseKeyPayload(text);
+            if (!r) { showToast('Mã QR này không phải mã đề của TNMaker.', 'error'); return false; }
+            const exam = getCurrentExam(), cfg = exam.config;
+            if (exam.keys[r.code] && !confirm(`Mã đề ${r.code} đã có. Ghi đè bằng đáp án từ mã QR?`)) return false;
+            if (r.p1c !== cfg.p1Count || r.p2c !== cfg.p2Count || r.p3c !== cfg.p3Count) {
+                if (!confirm(`Mã QR có ${r.p1c} câu phần I, ${r.p2c} câu phần II, ${r.p3c} câu phần III, khác cấu hình hiện tại (${cfg.p1Count}/${cfg.p2Count}/${cfg.p3Count}).\nĐổi số câu theo mã QR?`)) return false;
+                cfg.p1Count = r.p1c; cfg.p2Count = r.p2c; cfg.p3Count = r.p3c;
+                try { loadExamConfigToUI(); } catch (e) {}
+            }
+            exam.keys[r.code] = r.key;
+            activeKeyCode = r.code;
+            saveState();
+            renderKeyEditor();
+            closeQrImport();
+            showToast(`Đã nhập mã đề ${r.code} và đáp án từ mã QR`);
+            return true;
+        }
+
+        let qrStream = null, qrTimer = null, qrDetector = null, qrBusy = false, qrCanvasTmp = null;
+
+        async function openQrImport() {
+            document.getElementById('qrImportModal').classList.remove('hidden');
+            document.getElementById('qrPasteInput').value = '';
+            const msg = document.getElementById('qrScanMsg'), wrap = document.getElementById('qrVideoWrap');
+            if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                wrap.classList.add('hidden');
+                showToast('Quét trực tiếp cần HTTPS hoặc APK. Hãy chọn ảnh có mã QR hoặc dán nội dung.', 'error');
+                return;
+            }
+            wrap.classList.remove('hidden');
+            try {
+                if ('BarcodeDetector' in window) { try { qrDetector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { qrDetector = null; } }
+                qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+                const v = document.getElementById('qrVideo');
+                v.srcObject = qrStream; await v.play().catch(() => {});
+                msg.textContent = 'Đưa mã QR vào khung';
+                qrTimer = setInterval(qrScanTick, 200);
+            } catch (e) {
+                wrap.classList.add('hidden');
+                showToast('Không mở được camera. Hãy chọn ảnh có mã QR hoặc dán nội dung.', 'error');
+            }
+        }
+
+        function closeQrImport() {
+            if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+            if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
+            document.getElementById('qrImportModal').classList.add('hidden');
+        }
+
+        async function qrScanTick() {
+            if (qrBusy) return;
+            const v = document.getElementById('qrVideo');
+            if (!v.videoWidth) return;
+            qrBusy = true;
+            try {
+                let text = null;
+                if (qrDetector) { try { const r = await qrDetector.detect(v); if (r && r.length) text = r[0].rawValue; } catch (e) {} }
+                if (!text) {
+                    if (!qrCanvasTmp) qrCanvasTmp = document.createElement('canvas');
+                    const k = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight));
+                    qrCanvasTmp.width = Math.round(v.videoWidth * k); qrCanvasTmp.height = Math.round(v.videoHeight * k);
+                    const ctx = qrCanvasTmp.getContext('2d', { willReadFrequently: true });
+                    ctx.drawImage(v, 0, 0, qrCanvasTmp.width, qrCanvasTmp.height);
+                    text = TNQR.decodeImageData(ctx.getImageData(0, 0, qrCanvasTmp.width, qrCanvasTmp.height));
+                }
+                if (text) {
+                    if (parseKeyPayload(text)) {
+                        if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+                        const ok = importKeyPayload(text);
+                        if (!ok && !document.getElementById('qrImportModal').classList.contains('hidden')) qrTimer = setInterval(qrScanTick, 200);
+                    } else document.getElementById('qrScanMsg').textContent = 'Đây không phải mã QR mã đề của TNMaker';
+                }
+            } finally { qrBusy = false; }
+        }
+
+        function qrImportFromFile(event) {
+            const input = event.target, file = input.files && input.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file), img = new Image();
+            img.onload = async () => {
+                URL.revokeObjectURL(url);
+                const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+                const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+                const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(img, 0, 0, c.width, c.height);
+                let text = null;
+                if ('BarcodeDetector' in window) { try { const d = await new BarcodeDetector({ formats: ['qr_code'] }).detect(c); if (d && d.length) text = d[0].rawValue; } catch (e) {} }
+                if (!text) text = TNQR.decodeImageData(ctx.getImageData(0, 0, c.width, c.height));
+                if (!text) { showToast('Không tìm thấy mã QR trong ảnh. Hãy chụp rõ, đủ cả mã QR.', 'error'); return; }
+                importKeyPayload(text);
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); showToast('Không đọc được ảnh này.', 'error'); };
+            img.src = url;
+            input.value = '';
         }
 
         function selectExamCode(code) {
@@ -4015,7 +4702,7 @@
             loadExamConfigToUI();
             generateMockBGDSheet();
             loadSimulatedSheetToScanner('perfect');
-            switchTab('tab-scanner');
+            switchTab('tab-config');   // vào ứng dụng là mở ngay Cấu hình số câu & thang điểm
         };
     </script>
 
@@ -4023,6 +4710,63 @@
     <div id="scanResultOverlay" class="hidden fixed inset-0 z-[80] bg-slate-900/95 overflow-y-auto no-print">
         <div class="min-h-full flex flex-col items-center justify-center p-4 gap-3">
             <div id="scanResultOverlayBody" class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4"></div>
+        </div>
+    </div>
+
+    <!-- CHIA SẺ MÃ ĐỀ + ĐÁP ÁN BẰNG MÃ QR -->
+    <div id="qrShareModal" class="hidden fixed inset-0 z-[90] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div class="p-4 bg-slate-900 text-white flex items-center justify-between">
+                <div><span class="text-[11px] text-emerald-400 font-bold uppercase">Chia sẻ bằng mã QR</span>
+                    <h3 id="qrShareTitle" class="text-base font-bold">Mã đề 1024</h3></div>
+                <button onclick="closeQrShare()" class="w-8 h-8 rounded-lg bg-slate-800 text-lg" aria-label="Đóng">&#10005;</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <div class="grid grid-cols-2 gap-2 text-xs font-bold">
+                    <button id="qrModeOne" onclick="setQrMode('one')" class="py-2 rounded-lg bg-slate-900 text-white">Mã đề đang chọn</button>
+                    <button id="qrModeAll" onclick="setQrMode('all')" class="py-2 rounded-lg bg-slate-100 text-slate-700">Tất cả mã đề</button>
+                </div>
+                <div class="relative flex items-center justify-center bg-white border border-slate-200 rounded-xl p-2">
+                    <button id="qrPrev" onclick="qrNav(-1)" class="absolute left-1 w-9 h-9 rounded-full bg-slate-900/70 text-white text-lg font-bold" aria-label="Mã trước">&#8249;</button>
+                    <canvas id="qrCanvas" class="w-full max-w-[300px] h-auto" style="image-rendering:pixelated"></canvas>
+                    <button id="qrNext" onclick="qrNav(1)" class="absolute right-1 w-9 h-9 rounded-full bg-slate-900/70 text-white text-lg font-bold" aria-label="Mã sau">&#8250;</button>
+                </div>
+                <p id="qrShareInfo" class="text-xs text-center text-slate-500"></p>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="downloadQr()" class="py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">Lưu ảnh QR</button>
+                    <button onclick="copyQrText()" class="py-2.5 rounded-xl bg-slate-200 text-slate-800 text-xs font-bold">Sao chép nội dung</button>
+                </div>
+                <p class="text-[11px] text-slate-400 text-center">Người nhận mở tab Đáp án, bấm "Nhập bằng mã QR" rồi quét mã này (hoặc chọn ảnh QR đã lưu).</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NHẬP MÃ ĐỀ + ĐÁP ÁN BẰNG MÃ QR -->
+    <div id="qrImportModal" class="hidden fixed inset-0 z-[90] bg-slate-900/90 flex items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div class="p-4 bg-slate-900 text-white flex items-center justify-between">
+                <div><span class="text-[11px] text-emerald-400 font-bold uppercase">Nhập bằng mã QR</span>
+                    <h3 class="text-base font-bold">Quét mã QR mã đề</h3></div>
+                <button onclick="closeQrImport()" class="w-8 h-8 rounded-lg bg-slate-800 text-lg" aria-label="Đóng">&#10005;</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <div id="qrVideoWrap" class="relative bg-black rounded-xl overflow-hidden" style="aspect-ratio:1/1">
+                    <video id="qrVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
+                    <div class="absolute inset-[12%] border-2 border-emerald-400 rounded-xl pointer-events-none"></div>
+                    <div id="qrScanMsg" class="absolute bottom-2 inset-x-2 text-center text-[11px] font-semibold text-emerald-300 bg-black/60 rounded-full px-2 py-1">Đưa mã QR vào khung</div>
+                </div>
+                <label class="block w-full text-center py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer">
+                    Chọn ảnh có mã QR
+                    <input type="file" accept="image/*" class="hidden" onchange="qrImportFromFile(event)">
+                </label>
+                <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase">Hoặc dán nội dung mã</label>
+                    <div class="flex gap-2 mt-1">
+                        <input id="qrPasteInput" type="text" placeholder="TNM1|1024|..." class="flex-1 min-w-0 px-2.5 py-2 rounded-lg border border-slate-300 text-xs font-mono outline-none focus:border-indigo-500">
+                        <button onclick="importKeyPayload(document.getElementById('qrPasteInput').value)" class="px-3 rounded-lg bg-slate-900 text-white text-xs font-bold">Nhập</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </body>
