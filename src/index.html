@@ -167,7 +167,9 @@
             <div class="flex items-center justify-between h-14 md:h-16 gap-2">
                 <!-- Brand -->
                 <div class="flex items-center gap-2 md:gap-3 min-w-0">
-                    <div class="w-9 h-9 md:w-10 md:h-10 shrink-0 rounded-xl bg-gradient-to-br from-indigo-500 to-emerald-500 flex items-center justify-center shadow-md">
+                    <div class="w-9 h-9 md:w-10 md:h-10 shrink-0 rounded-xl flex items-center justify-center">
+                        <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRoE5Mx8L0R7NMOLgPx9w7ZPgAQBd5Ts_Y5zBzrJ0-f7AdgWfWALqCZe2E-&s=10"
+                    </div>
                         <i class="fa-solid fa-camera-viewfinder text-xl text-white"></i>
                     </div>
                     <div>
@@ -175,7 +177,7 @@
                             <span class="font-bold text-lg tracking-tight">HCTMaker <span class="text-emerald-400">Pro</span></span>
                             <span class="hidden sm:inline-block text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">Mẫu Đen Trắng BGD 2025</span>
                         </div>
-                        <p class="text-xs text-slate-400 hidden sm:block">Chuẩn Phiếu TLTN 2025 Mã đề 4 số đen trắng (GDPT 2018) - Copyright © Trần Tài Lộc</p>
+                        <p class="text-xs text-slate-400 hidden sm:block">Chuẩn Phiếu TLTN 2025 Mã đề 4 số đen trắng (GDPT 2018) - (Copyright © Trần Tài Lộc)</p>
                     </div>
                 </div>
 
@@ -189,6 +191,9 @@
                     </div>
                     <button onclick="openNewExamModal()" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-sm">
                         <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">Tạo Kỳ Thi</span>
+                    </button>
+                    <button onclick="deleteCurrentExam()" class="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-sm" aria-label="Xóa kỳ thi đang chọn">
+                        <i class="fa-solid fa-trash-can"></i> <span class="hidden sm:inline">Xóa Kỳ Thi</span>
                     </button>
                 </div>
             </div>
@@ -1914,6 +1919,27 @@ if (typeof module !== 'undefined') module.exports = TNQR;
             sel.innerHTML = appState.exams.map(ex =>
                 `<option value="${ex.id}" ${ex.id === activeExamId ? 'selected' : ''} class="bg-slate-900 text-white">${ex.name} (${ex.subject})</option>`
             ).join('');
+        }
+
+        function deleteCurrentExam() {
+            if (appState.exams.length <= 1) {
+                showToast('Phải giữ lại ít nhất 1 kỳ thi. Hãy tạo kỳ thi mới trước khi xóa kỳ thi này.', 'error');
+                return;
+            }
+            const exam = getCurrentExam();
+            if (!confirm(`Xóa kỳ thi "${exam.name}" (${exam.subject})?\nSẽ mất ${exam.results.length} bài đã chấm, ${Object.keys(exam.keys).length} mã đề và danh sách học sinh của kỳ thi này. Không khôi phục được.`)) return;
+            const name = exam.name;
+            appState.exams = appState.exams.filter(e => e.id !== exam.id);
+            activeExamId = appState.exams[0].id;
+            const codes = Object.keys(getCurrentExam().keys);
+            activeKeyCode = codes[0] || '1024';
+            saveState();
+            populateExamDropdown();
+            loadExamConfigToUI();
+            renderKeyEditor();
+            renderResultsAndAnalytics();
+            refreshTopBanner();
+            showToast('Đã xóa kỳ thi: ' + name);
         }
 
         function switchActiveExam(examId) {
