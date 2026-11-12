@@ -668,12 +668,6 @@
                                 <button onclick="startLiveCamera()" id="btnStartCam" class="px-3.5 py-2.5 md:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold flex items-center gap-1.5 transition shadow">
                                     <i class="fa-solid fa-video"></i> Camera trực tiếp
                                 </button>
-                                <label id="autoSaveWrap" class="px-3 py-2.5 md:py-2 rounded-xl bg-slate-800 border border-slate-600 text-xs font-bold flex items-center gap-2 cursor-pointer text-amber-300">
-                                    <input type="checkbox" id="autoSaveToggle" checked class="accent-amber-400"> Tự lưu và quét bài kế tiếp
-                                </label>
-                                <label id="autoCapWrap" class="hidden px-3 py-2.5 md:py-2 rounded-xl bg-slate-800 border border-slate-600 text-xs font-bold items-center gap-2 cursor-pointer text-emerald-300" style="display:none">
-                                    <input type="checkbox" id="autoCaptureToggle" checked class="w-4 h-4 accent-emerald-400"> Tự động chụp
-                                </label>
                                 <button onclick="stopLiveCamera()" id="btnStopCam" class="hidden px-3.5 py-2.5 md:py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold flex items-center gap-1.5 transition">
                                     <i class="fa-solid fa-video-slash"></i> Dừng Camera
                                 </button>
@@ -717,20 +711,29 @@
                             <!-- Main OMR Canvas (1000x1452 High-Res A4 Ratio) -->
                             <canvas id="omrScannerCanvas" width="1000" height="1452" class="w-full max-h-[78vh] md:max-h-[720px] object-contain bg-white"></canvas>
 
-                            <!-- Khung camera: dùng TOÀN BỘ khung hình camera (không cắt), máy tự tìm 4 ô vuông đen ở bất kỳ vị trí nào -->
-                            <div id="cameraStage" class="hidden relative bg-black" style="aspect-ratio:3/4;width:min(100%,calc(78vh*0.75));">
-                                <video id="cameraVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
-                                <canvas id="camDebug" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
-                                <div id="cameraViewfinderOverlay" class="absolute inset-0 pointer-events-none">
-                                    <div class="scanner-laser"></div>
-                                    <button id="camSwitchBtn" onclick="switchCamera()" class="hidden pointer-events-auto absolute top-2 right-2 px-2.5 py-1.5 rounded-lg bg-black/60 border border-white/30 text-white text-[11px] font-bold" aria-label="Đổi camera">&#x21BB; Đổi camera</button>
-                                    <input id="camZoom" type="range" class="hidden pointer-events-auto absolute bottom-[8%] right-3 w-28 accent-emerald-400" aria-label="Zoom">
-                                    <button onclick="captureFromCameraAndGrade()" class="pointer-events-auto absolute bottom-[6%] left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white/90 border-4 border-emerald-400 shadow-xl active:scale-95 transition" aria-label="Chụp và chấm"><i class="fa-solid fa-camera text-xl text-slate-900"></i></button>
-                                    <div class="absolute bottom-[1.2%] inset-x-0 text-center px-2">
-                                        <span id="camAutoStatus" class="inline-block px-2.5 py-0.5 rounded-full bg-black/70 text-emerald-300 text-[10px] font-medium border border-emerald-500/40">
-                                            Hướng camera vào phiếu, máy tự chụp khi thấy đủ 4 ô vuông đen
-                                        </span>
+                            <!-- Camera toàn màn hình: hiện ngay khi vào tab Quét, tự tìm 4 ô vuông đen -->
+                            <div id="cameraStage" class="hidden fixed inset-0 z-[70] bg-black">
+                                <div id="camInner" class="absolute" style="left:0;top:0;width:100%;height:100%;">
+                                    <video id="cameraVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
+                                    <canvas id="camDebug" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+                                    <div id="cameraViewfinderOverlay" class="absolute inset-0 pointer-events-none overflow-hidden">
+                                        <div class="scanner-laser"></div>
                                     </div>
+                                </div>
+                                <button onclick="stopLiveCamera()" class="absolute top-3 left-3 w-10 h-10 rounded-full bg-black/60 border border-white/30 text-white text-xl font-bold flex items-center justify-center" aria-label="Đóng camera">&#10005;</button>
+                                <button id="camSwitchBtn" onclick="switchCamera()" class="hidden absolute top-3 right-3 px-3 py-2 rounded-xl bg-black/60 border border-white/30 text-white text-xs font-bold" aria-label="Đổi camera">&#x21BB; Đổi camera</button>
+                                <div class="absolute top-16 inset-x-0 flex justify-center gap-2 px-3 flex-wrap">
+                                    <label id="autoCapWrap" class="hidden px-3 py-1.5 rounded-full bg-black/60 border border-white/20 text-[11px] font-bold items-center gap-1.5 text-emerald-300" style="display:none">
+                                        <input type="checkbox" id="autoCaptureToggle" checked class="accent-emerald-400"> Tự động chụp
+                                    </label>
+                                    <label id="autoSaveWrap" class="px-3 py-1.5 rounded-full bg-black/60 border border-white/20 text-[11px] font-bold flex items-center gap-1.5 text-amber-300">
+                                        <input type="checkbox" id="autoSaveToggle" checked class="accent-amber-400"> Tự lưu và quét tiếp
+                                    </label>
+                                </div>
+                                <input id="camZoom" type="range" class="hidden absolute bottom-24 right-4 w-32 accent-emerald-400" aria-label="Zoom">
+                                <div class="absolute bottom-0 inset-x-0 pb-5 pt-10 flex flex-col items-center gap-3 bg-gradient-to-t from-black/80 to-transparent">
+                                    <span id="camAutoStatus" class="inline-block px-3 py-1 rounded-full bg-black/70 text-emerald-300 text-xs font-medium border border-emerald-500/40 text-center mx-3">Hướng camera vào phiếu, máy tự chụp khi thấy đủ 4 ô vuông đen</span>
+                                    <button onclick="captureFromCameraAndGrade()" class="w-16 h-16 rounded-full bg-white/90 border-4 border-emerald-400 shadow-xl active:scale-95 transition" aria-label="Chụp và chấm"><i class="fa-solid fa-camera text-xl text-slate-900"></i></button>
                                 </div>
                             </div>
                         </div>
@@ -790,7 +793,11 @@
                             <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
                                 <label class="block text-[11px] font-bold text-slate-500 uppercase">Số Báo Danh (8 số)</label>
                                 <input type="text" id="scannedSBDInput" inputmode="numeric" pattern="[0-9]*" maxlength="8" oninput="manualRegradeCurrentSheet()" class="w-full mt-1 font-mono font-bold text-lg text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-300 focus:border-indigo-500 outline-none" value="00010001">
-                                <span id="scannedStudentName" class="text-xs text-indigo-600 font-semibold mt-1 block truncate">Nguyễn Văn An (12A1)</span>
+                                <span id="scannedStudentName" class="text-xs text-indigo-600 font-semibold mt-1 block">Nguyễn Văn An (12A1)</span>
+                                <div id="scannedNameWrap" class="hidden mt-2">
+                                    <img id="scannedNameImage" alt="Họ tên trên phiếu" class="w-full rounded border border-slate-200 bg-white">
+                                    <input type="text" id="scannedNameInput" oninput="setTypedStudentName(this.value)" placeholder="Gõ họ tên (nếu muốn)" class="w-full mt-1 text-xs px-2 py-1 rounded-lg border border-slate-300 outline-none focus:border-indigo-500">
+                                </div>
                             </div>
                             <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
                                 <label class="block text-[11px] font-bold text-slate-500 uppercase">Mã Đề Thi (4 số)</label>
@@ -1386,6 +1393,9 @@
 
             if (tabId !== 'tab-scanner') {
                 stopLiveCamera();
+                hideScanResultOverlay();
+            } else if (!mediaStream && window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                setTimeout(() => { if (!mediaStream && !document.getElementById('tab-scanner').classList.contains('hidden')) startLiveCamera(); }, 50);
             }
 
             if (tabId === 'tab-keys') renderKeyEditor();
@@ -2389,6 +2399,21 @@
             return cleaned;
         }
 
+        let typedStudentName = '';
+        function cropNameFromSheet() {
+            try {
+                const c = document.createElement('canvas'); c.width = 420; c.height = 76;
+                c.getContext('2d').drawImage(rawScannedCanvasBuffer, 418, 288, 210, 38, 0, 0, 420, 76);
+                return c.toDataURL('image/jpeg', 0.7);
+            } catch (e) { return ''; }
+        }
+        function setTypedStudentName(v) {
+            typedStudentName = v.trim();
+            if (currentEvaluatedSheet && currentEvaluatedSheet.nameFromSheet) {
+                currentEvaluatedSheet.studentName = typedStudentName || `Thí sinh ${currentEvaluatedSheet.sbd}`;
+            }
+        }
+
         function gradeDetectedAnswers(sbd, examCode, p1Answers, p2Answers, p3Answers) {
             const exam = getCurrentExam();
             const cfg = exam.config;
@@ -2417,7 +2442,17 @@
             const studentInfo = exam.roster[sbd];
             document.getElementById('scannedStudentName').textContent = studentInfo
                 ? `${studentInfo.name} (${studentInfo.className})`
-                : 'Chưa có trong danh sách lớp (Vẫn chấm bình thường)';
+                : 'SBD chưa có trong danh sách: lấy họ tên theo phiếu';
+            {
+                const wrap = document.getElementById('scannedNameWrap');
+                if (wrap) {
+                    wrap.classList.toggle('hidden', !!studentInfo);
+                    if (!studentInfo) {
+                        document.getElementById('scannedNameImage').src = cropNameFromSheet();
+                        document.getElementById('scannedNameInput').value = typedStudentName;
+                    }
+                }
+            }
 
             const codeStatusEl = document.getElementById('scannedCodeStatus');
             if (isMatchedCode) {
@@ -2480,7 +2515,9 @@
 
             currentEvaluatedSheet = {
                 sbd,
-                studentName: studentInfo ? studentInfo.name : `Thí sinh ${sbd}`,
+                studentName: studentInfo ? studentInfo.name : (typedStudentName || `Thí sinh ${sbd}`),
+                nameFromSheet: !studentInfo,
+                nameImage: studentInfo ? '' : cropNameFromSheet(),
                 examCode: isMatchedCode ? examCode : activeKeyCode,
                 p1Score: Number(p1Score.toFixed(2)),
                 p2Score: Number(p2Score.toFixed(2)),
@@ -3051,12 +3088,15 @@
         }
 
         function fitCameraStage() {
-            const v = document.getElementById('cameraVideo'), st = document.getElementById('cameraStage');
-            if (!v || !st || !v.videoWidth) return;
-            const asp = v.videoWidth / v.videoHeight;
-            st.style.aspectRatio = v.videoWidth + '/' + v.videoHeight;
-            st.style.width = 'min(100%, calc(78vh * ' + asp.toFixed(4) + '))';
+            const v = document.getElementById('cameraVideo'), inner = document.getElementById('camInner');
+            if (!v || !inner || !v.videoWidth) return;
+            const W = window.innerWidth, H = window.innerHeight;
+            const k = Math.min(W / v.videoWidth, H / v.videoHeight);
+            const w = v.videoWidth * k, h = v.videoHeight * k;
+            inner.style.width = w + 'px'; inner.style.height = h + 'px';
+            inner.style.left = ((W - w) / 2) + 'px'; inner.style.top = ((H - h) / 2) + 'px';
         }
+        window.addEventListener('resize', fitCameraStage);
 
         function drawCameraDebug(det) {
             const cv = document.getElementById('camDebug');
@@ -3147,24 +3187,13 @@
             if (!video || !video.videoWidth) { autoScanBusy = false; return; }
             loadPhotoSource(grabFullFrame(video));   // dừng camera, dò 4 góc lại trên đúng khung hình vừa chụp, nắn phẳng, chấm
             try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
-            showToast('Đã tự chụp và chấm bài!');
             scrollToScanResult();
-            const as = document.getElementById('autoSaveToggle');
-            if (as && as.checked) {
-                const sheetRef = currentEvaluatedSheet;
-                setTimeout(() => {
-                    const still = document.getElementById('autoSaveToggle');
-                    if (still && still.checked && currentEvaluatedSheet === sheetRef && sheetRef && sheetRef.keyUsed) saveAndScanNext();
-                    else if (sheetRef && !sheetRef.keyUsed) showToast('Chưa tự lưu: mã đề chưa khớp, hãy kiểm tra rồi bấm lưu.', 'error');
-                }, 3000);
-            }
         }
 
         function captureFromCameraAndGrade() {
             const video = document.getElementById('cameraVideo');
             if (!video.videoWidth) { showToast('Camera chưa sẵn sàng, thử lại sau giây lát.', 'error'); return; }
             loadPhotoSource(grabFullFrame(video));
-            showToast('Đã chụp, tự bắt 4 góc đen và chấm bài!');
             scrollToScanResult();
         }
 
@@ -3184,9 +3213,73 @@
             ctx.restore();
         }
 
+        let resultCountdown = null;
+        function hideScanResultOverlay() {
+            if (resultCountdown) { clearInterval(resultCountdown); resultCountdown = null; }
+            const ov = document.getElementById('scanResultOverlay');
+            if (ov) ov.classList.add('hidden');
+        }
+        function cancelResultCountdown() {
+            if (resultCountdown) { clearInterval(resultCountdown); resultCountdown = null; }
+            const b = document.getElementById('ovSaveBtn');
+            if (b) b.textContent = 'Lưu và quét bài tiếp';
+        }
+        function overlayRescan() {
+            hideScanResultOverlay();
+            if (window.isSecureContext && navigator.mediaDevices) startLiveCamera();
+        }
+        function overlaySave() { hideScanResultOverlay(); saveAndScanNext(); }
+        function overlayDetail() { hideScanResultOverlay(); scrollToScanResult(); }
+
+        function showScanResultOverlay() {
+            const sh = currentEvaluatedSheet;
+            if (!sh) return;
+            const exam = getCurrentExam(), mx = calculateMaxTotalPoints(exam.config);
+            const fmt = (v, m) => `<div class="text-center p-2 rounded-xl bg-slate-100"><div class="text-xl font-black text-slate-900">${v.toFixed(2)}</div><div class="text-[11px] font-bold text-slate-500">/ ${m.toFixed(2)} đ</div></div>`;
+            const body = document.getElementById('scanResultOverlayBody');
+            const info = exam.roster[sh.sbd];
+            let nameHtml;
+            if (info) nameHtml = `<div class="text-base font-extrabold text-slate-900">${info.name}</div><div class="text-xs text-slate-500">${info.className || ''}</div>`;
+            else nameHtml = `<div class="text-[11px] font-bold text-slate-500 uppercase mb-1">Họ tên trên phiếu</div>
+                <img src="${sh.nameImage || cropNameFromSheet()}" alt="Họ tên" class="w-full max-w-[300px] rounded border border-slate-200 bg-white">
+                <input type="text" value="${typedStudentName.replace(/"/g,'&quot;')}" oninput="setTypedStudentName(this.value);cancelResultCountdown()" placeholder="Gõ họ tên (nếu muốn)" class="w-full mt-1.5 text-sm px-2.5 py-1.5 rounded-lg border border-slate-300 outline-none focus:border-indigo-500">`;
+            if (!sh.keyUsed) {
+                body.innerHTML = `<div class="text-center"><div class="text-rose-600 font-extrabold mb-1">Chưa chấm được</div>
+                    <p class="text-sm text-slate-600 mb-3">SBD ${sh.sbd || '—'}. Mã đề trên phiếu chưa khớp đáp án đã khai báo.</p></div>
+                    <div class="mb-3">${nameHtml}</div>
+                    <div class="grid grid-cols-2 gap-2"><button onclick="overlayRescan()" class="py-3 rounded-xl bg-slate-200 font-bold text-sm">Quét lại</button>
+                    <button onclick="overlayDetail()" class="py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm">Nhập mã đề</button></div>`;
+            } else {
+                body.innerHTML = `<div class="flex items-start justify-between gap-3 mb-3">
+                        <div class="min-w-0"><div class="text-[11px] font-bold text-slate-500 uppercase">SBD <span class="font-mono text-slate-900 text-sm">${sh.sbd}</span> · Mã đề <span class="font-mono text-slate-900 text-sm">${sh.examCode}</span></div><div class="mt-1">${nameHtml}</div></div>
+                        <div class="text-right shrink-0"><div class="text-[11px] text-slate-400">Tổng điểm</div><div class="text-3xl font-black text-emerald-600 leading-none">${sh.totalScore.toFixed(2)}</div><div class="text-xs font-bold text-slate-400">/ ${mx.total.toFixed(2)}</div></div></div>
+                    <div class="grid grid-cols-3 gap-2 mb-3">
+                        <div><div class="text-[11px] font-bold text-indigo-700 text-center mb-1">Phần I</div>${fmt(sh.p1Score, mx.p1Max)}</div>
+                        <div><div class="text-[11px] font-bold text-emerald-700 text-center mb-1">Phần II</div>${fmt(sh.p2Score, mx.p2Max)}</div>
+                        <div><div class="text-[11px] font-bold text-amber-700 text-center mb-1">Phần III</div>${fmt(sh.p3Score, mx.p3Max)}</div></div>
+                    <button id="ovSaveBtn" onclick="overlaySave()" class="w-full py-3 rounded-xl bg-emerald-600 text-white font-bold text-sm">Lưu và quét bài tiếp</button>
+                    <div class="grid grid-cols-2 gap-2 mt-2"><button onclick="overlayRescan()" class="py-2.5 rounded-xl bg-slate-200 font-bold text-xs">Quét lại bài này</button>
+                    <button onclick="overlayDetail()" class="py-2.5 rounded-xl bg-slate-200 font-bold text-xs">Xem chi tiết</button></div>`;
+                const at = document.getElementById('autoSaveToggle');
+                if (at && at.checked) {
+                    let left = 4;
+                    const btn = () => document.getElementById('ovSaveBtn');
+                    btn().textContent = `Lưu và quét bài tiếp (${left})`;
+                    resultCountdown = setInterval(() => {
+                        left--;
+                        if (left <= 0) { overlaySave(); return; }
+                        if (btn()) btn().textContent = `Lưu và quét bài tiếp (${left})`;
+                    }, 1000);
+                }
+            }
+            document.getElementById('scanResultOverlay').classList.remove('hidden');
+            try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
+        }
+
         function loadPhotoSource(source) {
             stopLiveCamera();
             photoSource = source;
+            typedStudentName = '';
             photoRotation = 0;
             hasUploadedRealPhoto = true;
             isCornerAdjustMode = false;
@@ -3195,6 +3288,7 @@
             document.getElementById('btnRotatePhoto').classList.remove('hidden');
             drawPhotoToOriginalCanvas();
             autoDetectFourCornersAndWarp(true);
+            showScanResultOverlay();
         }
 
         function rotatePhoto90() {
@@ -3443,6 +3537,8 @@
                 id: 'res_' + Date.now(),
                 sbd: currentEvaluatedSheet.sbd,
                 studentName: currentEvaluatedSheet.studentName,
+                nameFromSheet: !!currentEvaluatedSheet.nameFromSheet,
+                nameImage: currentEvaluatedSheet.nameImage || '',
                 examCode: currentEvaluatedSheet.examCode,
                 p1Score: currentEvaluatedSheet.p1Score,
                 p2Score: currentEvaluatedSheet.p2Score,
@@ -3462,6 +3558,7 @@
         }
 
         function saveAndScanNext() {
+            hideScanResultOverlay();
             if (saveCurrentScannedResult() === false) return;
             needSheetAway = true;
             document.getElementById('omrScannerCanvas').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3698,7 +3795,7 @@
                 <tr class="hover:bg-slate-50 transition">
                     <td class="py-3 px-4 font-semibold text-slate-500">${idx + 1}</td>
                     <td class="py-3 px-4 font-mono font-bold text-slate-900">${r.sbd}</td>
-                    <td class="py-3 px-4 font-bold text-slate-800">${r.studentName}</td>
+                    <td class="py-3 px-4 font-bold text-slate-800">${(r.nameFromSheet && r.nameImage && /^Thí sinh /.test(r.studentName)) ? `<img src="${r.nameImage}" alt="Họ tên trên phiếu" class="h-7 w-auto max-w-[150px] rounded border border-slate-200">` : r.studentName}</td>
                     <td class="py-3 px-4"><span class="px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 font-mono font-bold text-xs">${r.examCode}</span></td>
                     <td class="py-3 px-4 text-center font-semibold text-slate-700 hidden md:table-cell">${r.p1Score.toFixed(2)}</td>
                     <td class="py-3 px-4 text-center font-semibold text-slate-700 hidden md:table-cell">${r.p2Score.toFixed(2)}</td>
@@ -3750,7 +3847,7 @@
             }
             document.getElementById('modalScannedImage').src = imgUrl;
 
-            document.getElementById('modalScoreSummary').innerHTML = `
+            document.getElementById('modalScoreSummary').innerHTML = (rec.nameFromSheet && rec.nameImage ? `<div class="col-span-2 p-2 rounded-xl bg-slate-100"><span class="text-xs text-slate-500 block mb-1">Họ tên trên phiếu</span><img src="${rec.nameImage}" alt="Họ tên" class="w-full max-w-xs rounded border border-slate-200 bg-white"></div>` : '') + `
                 <div class="p-3 rounded-xl bg-slate-100">
                     <span class="text-xs text-slate-500 block">Tổng điểm</span>
                     <span class="text-2xl font-black text-emerald-600">${rec.totalScore.toFixed(2)} / ${calculateMaxTotalPoints(getCurrentExam().config).total.toFixed(2)} đ</span>
@@ -3921,5 +4018,12 @@
             switchTab('tab-scanner');
         };
     </script>
+
+    <!-- KẾT QUẢ SAU KHI QUÉT -->
+    <div id="scanResultOverlay" class="hidden fixed inset-0 z-[80] bg-slate-900/95 overflow-y-auto no-print">
+        <div class="min-h-full flex flex-col items-center justify-center p-4 gap-3">
+            <div id="scanResultOverlayBody" class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-4"></div>
+        </div>
+    </div>
 </body>
 </html>
