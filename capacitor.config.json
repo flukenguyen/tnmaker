@@ -1,0 +1,11 @@
+{
+  "appId": "vn.tnmaker.pro",
+  "appName": "TNMaker Pro",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
