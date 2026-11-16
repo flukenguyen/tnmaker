@@ -5,7 +5,8 @@
   "description": "TNMaker Pro - Cham trac nghiem OMR bang camera dien thoai",
   "scripts": {
     "prepare-web": "node scripts/prepare-web.mjs && tailwindcss -c tailwind.config.js -i input.css -o www/tailwind.css --minify",
-    "build-apk": "npm run prepare-web && npx cap add android && node scripts/patch-android.mjs && npx cap sync android && cd android && ./gradlew assembleDebug"
+    "build-apk": "npm run prepare-web && npx cap add android && node scripts/patch-android.mjs && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "prepare-pwa": "node scripts/prepare-pwa.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.1.0",

@@ -29,3 +29,21 @@ Sửa `src/index.html`, tải lên lại repository, chạy lại workflow **Bui
 
 ## Nếu build bị lỗi
 Mở lần chạy lỗi trong tab Actions, bấm vào bước bị đỏ và gửi lại đoạn log cuối cho người hỗ trợ bạn.
+
+---
+
+# Cài trên iPhone / iPad (ứng dụng web cài được – PWA)
+
+iPhone không cài được file APK. Dự án này tự tạo thêm một bản web cài được vào màn hình chính,
+chạy offline sau lần mở đầu tiên, dùng được camera quét.
+
+1. Repository phải để **Public** (GitHub Pages miễn phí không hỗ trợ Private). Dữ liệu học sinh lưu trên máy, không nằm trong repository.
+2. Có tệp `.github/workflows/deploy-pages.yml` (nếu không upload được thư mục `.github`, tạo bằng **Add file → Create new file** với đúng tên đó và dán nội dung).
+3. Vào **Settings → Pages**, mục **Source** chọn **GitHub Actions**.
+4. Vào tab **Actions → Deploy iOS web app → Run workflow**, đợi tích xanh (khoảng 3 phút).
+5. Địa chỉ ứng dụng: `https://TÊN-GITHUB.github.io/TÊN-REPO/` (hiện ở cuối lần chạy, mục deploy).
+6. Trên iPhone mở địa chỉ đó bằng **Safari** → nút Chia sẻ → **Thêm vào Màn hình chính**.
+7. Mở từ biểu tượng ngoài màn hình chính, cho phép **Camera** khi được hỏi.
+
+Mỗi lần sửa `src/index.html` và đẩy lên GitHub, ứng dụng tự cập nhật; trên iPhone hãy đóng hẳn ứng dụng rồi mở lại 1–2 lần để nhận bản mới.
+Dữ liệu (kỳ thi, đáp án, điểm) lưu trong ứng dụng trên máy; nên xuất CSV định kỳ.
